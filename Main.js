@@ -1,9 +1,7 @@
-javascript:(function(){
-    // ===== REMOVE ANY EXISTING PANEL =====
+(function(){
     const existing = document.getElementById('__forest_panel__');
     if (existing) existing.remove();
 
-    // ===== HELPERS =====
     function findWhiteboard() {
         const selectors = [
             'canvas', '.whiteboard canvas', '#whiteboard canvas',
@@ -67,18 +65,42 @@ javascript:(function(){
         return new Promise(r => setTimeout(r, 500));
     }
 
+    // Helper: reduce a fraction
+    function gcd(a, b) { return b ? gcd(b, a % b) : Math.abs(a); }
+    function simplifyFraction(n, d) {
+        if (d === 0) return `${n}/${d}`;
+        const g = gcd(n, d);
+        return `${n / g}/${d / g}`;
+    }
+
+    // FIXED: handles "2/4", "(2/4)", "1 / 7", negative numerators, etc.
+    function parseFraction(str) {
+        if (!str) return null;
+        let s = String(str).trim();
+        // Strip outer parentheses or brackets
+        s = s.replace(/^[\(\[\{]\s*/, '').replace(/\s*[\)\]\}]$/, '');
+        // Strip inner brackets like "2/[14]" → "2/14"
+        s = s.replace(/[\[\]\(\)\{\}]/g, '');
+        const m = s.match(/^(-?\d+)\s*\/\s*(\d+)$/);
+        if (!m) return null;
+        const n = parseInt(m[1], 10);
+        const d = parseInt(m[2], 10);
+        if (!isFinite(n) || !isFinite(d) || d === 0) return null;
+        return { n, d };
+    }
+
     function makeLongCalculationFor(targetStr) {
-        const fracMatch = targetStr.match(/^(-?\d+)\s*\/\s*(\d+)$/);
-        if (fracMatch) {
-            const num = parseInt(fracMatch[1], 10);
-            const den = parseInt(fracMatch[2], 10);
+        // Try to read it as a fraction (with or without parens/brackets)
+        const frac = parseFraction(targetStr);
+        if (frac) {
+            const { n, d } = frac;
             const factor = Math.floor(Math.random() * 5) + 2;
-            return `${num * factor}/${den * factor}=${num}/${den}`;
+            return `${n * factor}/${d * factor}=${simplifyFraction(n, d)}`;
         }
 
-        const cleaned = targetStr.replace(/,/g, '.');
+        const cleaned = String(targetStr).replace(/,/g, '.').replace(/[\[\]\(\)\{\}]/g, '');
         const target = parseFloat(cleaned);
-        if (isNaN(target)) return targetStr;
+        if (isNaN(target)) return String(targetStr);
 
         const isDecimal = !Number.isInteger(target);
         const decimals = isDecimal ? (cleaned.split('.')[1] || '').length : 0;
@@ -145,166 +167,286 @@ javascript:(function(){
         if (!canvas) { console.log('No canvas'); return false; }
         const ctx = canvas.getContext('2d');
         if (!ctx) return false;
-
         const cw = canvas.width, ch = canvas.height;
         const scale = Math.min(cw / 800, ch / 600);
-        ctx.strokeStyle = 'black';
-        ctx.lineWidth = Math.max(2, 2 * scale);
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-
+        ctx.strokeStyle = 'rgba(15, 15, 25, 0.93)';
         const rect = canvas.getBoundingClientRect();
         const toScreen = (x, y) => ({
             x: rect.left + (x / cw) * rect.width,
             y: rect.top + (y / ch) * rect.height
         });
 
-        function path(points) {
+        function linePoints(x1, y1, x2, y2) {
+            const dx = x2 - x1, dy = y2 - y1;
+            const len = Math.hypot(dx, dy) || 1;
+            const nx = -dy / len, ny = dx / len;
+            const bow = (Math.random() - 0.5) * 0.08 * len;
+            const mx = (x1 + x2) / 2 + nx * bow;
+            const my = (y1 + y2) / 2 + ny * bow;
+            const over = Math.random() * 0.04 * len;
+            const ux = dx / len, uy = dy / len;
+            const x2o = x2 + ux * over;
+            const y2o = y2 + uy * over;
+            const steps = Math.max(6, Math.floor(len / 3));
+            const pts = [];
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                const mt = 1 - t;
+                pts.push({
+                    x: mt * mt * x1 + 2 * mt * t * mx + t * t * x2o,
+                    y: mt * mt * y1 + 2 * mt * t * my + t * t * y2o
+                });
+            }
+            return pts;
+        }
+
+        function circlePoints(cx, cy, r) {
+            const pts = [];
+            const startAngle = Math.random() * Math.PI * 2;
+            const overshoot = 0.15 + Math.random() * 0.25;
+            const totalAngle = Math.PI * 2 + overshoot;
+            const steps = 28;
+            const rBase = r * (1 + (Math.random() - 0.5) * 0.05);
+            let rJitter = 0;
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                const a = startAngle + totalAngle * t;
+                rJitter = rJitter * 0.6 + (Math.random() - 0.5) * rBase * 0.06;
+                const rHere = rBase + rJitter;
+                pts.push({
+                    x: cx + rHere * Math.cos(a),
+                    y: cy + rHere * Math.sin(a)
+                });
+            }
+            return pts;
+        }
+
+        function jitterize(points, amt) {
+            const dense = [];
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i], p2 = points[i + 1];
+                const seg = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                const sub = Math.max(1, Math.floor(seg / 3));
+                for (let s = 0; s < sub; s++) {
+                    const t = s / sub;
+                    dense.push({
+                        x: p1.x + (p2.x - p1.x) * t,
+                        y: p1.y + (p2.y - p1.y) * t
+                    });
+                }
+            }
+            if (points.length) dense.push(points[points.length - 1]);
+            let jx = 0, jy = 0;
+            return dense.map((p) => {
+                jx = jx * 0.7 + (Math.random() - 0.5) * amt;
+                jy = jy * 0.7 + (Math.random() - 0.5) * amt;
+                return { x: p.x + jx, y: p.y + jy };
+            });
+        }
+
+        function drawStroke(points, baseWidth) {
             if (!points.length) return;
             const f = toScreen(points[0].x, points[0].y);
             canvas.dispatchEvent(new MouseEvent('mousedown', {
                 clientX: f.x, clientY: f.y, button: 0, bubbles: true
             }));
-            ctx.beginPath();
-            ctx.moveTo(points[0].x, points[0].y);
-            points.forEach(p => {
-                const sp = toScreen(p.x, p.y);
-                canvas.dispatchEvent(new MouseEvent('mousemove', {
-                    clientX: sp.x, clientY: sp.y, button: 0, bubbles: true
-                }));
-                ctx.lineTo(p.x, p.y);
-            });
-            ctx.stroke();
+            for (let i = 1; i < points.length; i++) {
+                const p0 = points[i - 1], p1 = points[i];
+                const t = i / points.length;
+                const pressure = 0.55 + Math.sin(t * Math.PI) * 0.45;
+                ctx.lineWidth = baseWidth * pressure * (0.9 + Math.random() * 0.2);
+                ctx.beginPath();
+                ctx.moveTo(p0.x, p0.y);
+                ctx.lineTo(p1.x, p1.y);
+                ctx.stroke();
+                if (i % 2 === 0) {
+                    const sp = toScreen(p1.x, p1.y);
+                    canvas.dispatchEvent(new MouseEvent('mousemove', {
+                        clientX: sp.x, clientY: sp.y, button: 0, bubbles: true
+                    }));
+                }
+            }
             const l = toScreen(points[points.length - 1].x, points[points.length - 1].y);
             canvas.dispatchEvent(new MouseEvent('mouseup', {
                 clientX: l.x, clientY: l.y, button: 0, bubbles: true
             }));
         }
 
-        const line = (x1, y1, x2, y2) => path([{x: x1, y: y1}, {x: x2, y: y2}]);
-        const circle = (cx, cy, r) => {
-            const pts = [];
-            for (let i = 0; i <= 20; i++) {
-                const a = (i / 20) * Math.PI * 2;
-                pts.push({x: cx + r * Math.cos(a), y: cy + r * Math.sin(a)});
-            }
-            path(pts);
-        };
-
-        function drawChar(ch, x, y, size) {
+        function getCharStrokes(ch, x, y, size) {
             const h = size, w = size * 0.6;
+            const S = [];
+            const L = (x1, y1, x2, y2) => S.push(linePoints(x1, y1, x2, y2));
+            const C = (cx, cy, r) => S.push(circlePoints(cx, cy, r));
             switch (ch) {
-                case '0': circle(x + w/2, y + h/2, h/2); break;
-                case '1': line(x + w/2, y, x + w/2, y + h); break;
+                case '0': C(x + w / 2, y + h / 2, h / 2); break;
+                case '1':
+                    L(x + w * 0.35, y + h * 0.75, x + w / 2, y + h * 0.1);
+                    L(x + w * 0.15, y + h * 0.75, x + w * 0.85, y + h * 0.75);
+                    break;
                 case '2':
-                    line(x, y, x + w, y);
-                    line(x + w, y, x + w, y + h/2);
-                    line(x + w, y + h/2, x, y + h/2);
-                    line(x, y + h/2, x, y + h);
-                    line(x, y + h, x + w, y + h);
+                    L(x + w * 0.1, y + h * 0.25, x + w * 0.55, y + h * 0.05);
+                    L(x + w * 0.55, y + h * 0.05, x + w * 0.85, y + h * 0.45);
+                    L(x + w * 0.85, y + h * 0.45, x + w * 0.1, y + h * 0.85);
+                    L(x + w * 0.1, y + h * 0.85, x + w * 0.9, y + h * 0.85);
                     break;
                 case '3':
-                    line(x, y, x + w, y);
-                    line(x + w, y, x + w, y + h);
-                    line(x + w, y + h, x, y + h);
-                    line(x + w, y + h/2, x, y + h/2);
+                    L(x + w * 0.15, y + h * 0.1, x + w * 0.8, y + h * 0.15);
+                    L(x + w * 0.8, y + h * 0.15, x + w * 0.5, y + h * 0.5);
+                    L(x + w * 0.5, y + h * 0.5, x + w * 0.85, y + h * 0.7);
+                    L(x + w * 0.85, y + h * 0.7, x + w * 0.15, y + h * 0.9);
                     break;
                 case '4':
-                    line(x, y, x, y + h/2);
-                    line(x, y + h/2, x + w, y + h/2);
-                    line(x + w, y, x + w, y + h);
+                    L(x + w * 0.65, y + h * 0.05, x + w * 0.15, y + h * 0.65);
+                    L(x + w * 0.15, y + h * 0.65, x + w * 0.9, y + h * 0.65);
+                    L(x + w * 0.7, y + h * 0.4, x + w * 0.7, y + h * 0.95);
                     break;
                 case '5':
-                    line(x + w, y, x, y);
-                    line(x, y, x, y + h/2);
-                    line(x, y + h/2, x + w, y + h/2);
-                    line(x + w, y + h/2, x + w, y + h);
-                    line(x + w, y + h, x, y + h);
+                    L(x + w * 0.8, y + h * 0.1, x + w * 0.2, y + h * 0.1);
+                    L(x + w * 0.2, y + h * 0.1, x + w * 0.15, y + h * 0.5);
+                    L(x + w * 0.15, y + h * 0.5, x + w * 0.7, y + h * 0.45);
+                    L(x + w * 0.7, y + h * 0.45, x + w * 0.85, y + h * 0.75);
+                    L(x + w * 0.85, y + h * 0.75, x + w * 0.15, y + h * 0.9);
                     break;
                 case '6':
-                    line(x + w, y, x, y);
-                    line(x, y, x, y + h);
-                    line(x, y + h, x + w, y + h);
-                    line(x + w, y + h, x + w, y + h/2);
-                    line(x + w, y + h/2, x, y + h/2);
+                    L(x + w * 0.8, y + h * 0.1, x + w * 0.25, y + h * 0.4);
+                    L(x + w * 0.25, y + h * 0.4, x + w * 0.2, y + h * 0.75);
+                    L(x + w * 0.2, y + h * 0.75, x + w * 0.6, y + h * 0.9);
+                    L(x + w * 0.6, y + h * 0.9, x + w * 0.8, y + h * 0.7);
+                    L(x + w * 0.8, y + h * 0.7, x + w * 0.55, y + h * 0.55);
+                    L(x + w * 0.55, y + h * 0.55, x + w * 0.2, y + h * 0.65);
                     break;
                 case '7':
-                    line(x, y, x + w, y);
-                    line(x + w, y, x + w, y + h);
+                    L(x + w * 0.1, y + h * 0.1, x + w * 0.85, y + h * 0.1);
+                    L(x + w * 0.85, y + h * 0.1, x + w * 0.4, y + h * 0.9);
                     break;
                 case '8':
-                    circle(x + w/2, y + h/4, h/4);
-                    circle(x + w/2, y + 3*h/4, h/4);
+                    C(x + w / 2, y + h * 0.28, h * 0.22);
+                    C(x + w / 2, y + h * 0.72, h * 0.25);
                     break;
                 case '9':
-                    line(x + w, y + h, x + w, y);
-                    line(x + w, y, x, y);
-                    line(x, y, x, y + h/2);
-                    line(x, y + h/2, x + w, y + h/2);
+                    C(x + w / 2, y + h * 0.3, h * 0.22);
+                    L(x + w * 0.75, y + h * 0.45, x + w * 0.4, y + h * 0.9);
                     break;
                 case '.':
-                    circle(x + w/2, y + h - size*0.08, size*0.06);
+                    C(x + w / 2, y + h - size * 0.08, size * 0.05);
                     break;
                 case '+':
-                    line(x + w/2, y + h*0.15, x + w/2, y + h*0.85);
-                    line(x, y + h/2, x + w, y + h/2);
+                    L(x + w / 2, y + h * 0.15, x + w / 2, y + h * 0.85);
+                    L(x + w * 0.05, y + h / 2, x + w * 0.95, y + h / 2);
                     break;
-                case '-': line(x, y + h/2, x + w, y + h/2); break;
+                case '-':
+                    L(x, y + h / 2, x + w, y + h / 2);
+                    break;
                 case '*':
-                    line(x, y + h*0.15, x + w, y + h*0.85);
-                    line(x + w, y + h*0.15, x, y + h*0.85);
+                    L(x + w * 0.05, y + h * 0.15, x + w * 0.95, y + h * 0.85);
+                    L(x + w * 0.95, y + h * 0.15, x + w * 0.05, y + h * 0.85);
+                    L(x + w / 2, y + h * 0.05, x + w / 2, y + h * 0.95);
                     break;
                 case '/':
-                    line(x + w, y + h*0.15, x, y + h*0.85);
+                    L(x + w * 0.95, y + h * 0.1, x + w * 0.05, y + h * 0.9);
                     break;
                 case '=':
-                    line(x, y + h*0.35, x + w, y + h*0.35);
-                    line(x, y + h*0.65, x + w, y + h*0.65);
+                    L(x + w * 0.05, y + h * 0.35, x + w * 0.95, y + h * 0.38);
+                    L(x + w * 0.05, y + h * 0.65, x + w * 0.95, y + h * 0.68);
                     break;
                 case '(':
-                    circle(x + w*1.5, y + h/2, h/2);
+                    {
+                        const cx = x + w * 1.5;
+                        const cy = y + h / 2;
+                        const r = h / 2;
+                        const pts = [];
+                        const startA = -Math.PI * 0.55;
+                        const endA = Math.PI * 0.55;
+                        const steps = 14;
+                        for (let i = 0; i <= steps; i++) {
+                            const t = i / steps;
+                            const a = startA + (endA - startA) * t;
+                            pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+                        }
+                        S.push(pts);
+                    }
                     break;
                 case ')':
-                    circle(x - w*0.5, y + h/2, h/2);
+                    {
+                        const cx = x - w * 0.5;
+                        const cy = y + h / 2;
+                        const r = h / 2;
+                        const pts = [];
+                        const startA = Math.PI - Math.PI * 0.55;
+                        const endA = Math.PI + Math.PI * 0.55;
+                        const steps = 14;
+                        for (let i = 0; i <= steps; i++) {
+                            const t = i / steps;
+                            const a = startA + (endA - startA) * t;
+                            pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+                        }
+                        S.push(pts);
+                    }
                     break;
             }
+            return S;
         }
 
         const text = textOverride || '0';
         console.log('Drawing on whiteboard:', text);
-
         const chars = text.split('');
         const targetWidth = cw * 0.92;
         const targetHeight = ch * 0.35;
         let size = Math.min(targetHeight, (targetWidth / chars.length) / 0.7);
         size = Math.max(14, Math.min(size, 120));
-
-        const spacing = size * 0.75;
-        const totalW = chars.length * spacing;
+        const avgSpacing = size * 0.75;
+        const totalW = chars.length * avgSpacing;
         const startX = Math.max(8, (cw - totalW) / 2);
-        const startY = (ch - size) / 2;
-
+        const baseY = (ch - size) / 2;
+        const jitterAmt = size * 0.015;
+        const baseWidth = Math.max(1.5, 2 * scale);
         let cx = startX;
-        for (const ch of chars) {
-            drawChar(ch, cx, startY, size);
-            cx += spacing;
+        let baselineDrift = 0;
+        let driftVel = 0;
+        for (let i = 0; i < chars.length; i++) {
+            const ch = chars[i];
+            driftVel += (Math.random() - 0.5) * size * 0.02;
+            driftVel *= 0.75;
+            baselineDrift += driftVel;
+            baselineDrift = Math.max(-size * 0.06, Math.min(size * 0.06, baselineDrift));
+            const charSize = size * (0.93 + Math.random() * 0.14);
+            const xOff = (Math.random() - 0.5) * size * 0.05;
+            const yOff = baselineDrift + (Math.random() - 0.5) * size * 0.04;
+            const rot = (Math.random() - 0.5) * 0.1;
+            const charX = cx + xOff;
+            const charY = baseY + yOff;
+            const strokes = getCharStrokes(ch, charX, charY, charSize);
+            const rcX = charX + charSize * 0.3;
+            const rcY = charY + charSize / 2;
+            const cos = Math.cos(rot), sin = Math.sin(rot);
+            for (const rawStroke of strokes) {
+                const rotated = rawStroke.map(p => {
+                    const dx = p.x - rcX;
+                    const dy = p.y - rcY;
+                    return {
+                        x: rcX + dx * cos - dy * sin,
+                        y: rcY + dx * sin + dy * cos
+                    };
+                });
+                const jittered = jitterize(rotated, jitterAmt);
+                drawStroke(jittered, baseWidth);
+            }
+            cx += avgSpacing * (0.92 + Math.random() * 0.16);
         }
         return true;
     }
-
-    // ===== FIXED: find the correct answer reliably =====
-    function isPlausibleAnswer(v) {
+        function isPlausibleAnswer(v) {
         if (v === null || v === undefined) return false;
         if (typeof v === 'number') {
             if (!isFinite(v)) return false;
-            // Reject values that look like IDs, timestamps, or huge numbers
             if (Math.abs(v) > 1000000) return false;
             return true;
         }
         if (typeof v === 'string') {
             const t = v.trim();
             if (!t) return false;
-            // Reject strings that look like IDs (long digit runs)
             if (/^\d{6,}$/.test(t)) return false;
             return true;
         }
@@ -332,10 +474,8 @@ javascript:(function(){
         if (!root) return null;
         const key = Object.keys(root).find(k => k.includes('react'));
         if (!key) return null;
-
         let bestAnswer = null;
         let bestPriority = -1;
-
         function consider(value, priority) {
             if (!isPlausibleAnswer(value)) return;
             if (priority > bestPriority) {
@@ -343,11 +483,8 @@ javascript:(function(){
                 bestPriority = priority;
             }
         }
-
         function scan(n) {
             if (!n) return;
-
-            // memoizedState chain
             let st = n.memoizedState;
             while (st) {
                 const v = st.memoizedState;
@@ -361,8 +498,6 @@ javascript:(function(){
                 }
                 st = st.next;
             }
-
-            // memoizedProps
             const p = n.memoizedProps || {};
             if (p.correctAnswer !== undefined) consider(p.correctAnswer, 3);
             if (p.correctAnswerValue !== undefined) consider(p.correctAnswerValue, 3);
@@ -370,11 +505,9 @@ javascript:(function(){
             if (p.answer !== undefined && p.correctAnswer === undefined) {
                 consider(p.answer, 1);
             }
-
             scan(n.child);
             scan(n.sibling);
         }
-
         scan(root[key]);
         return bestAnswer;
     }
@@ -400,18 +533,18 @@ javascript:(function(){
         return String(a);
     }
 
+    // FIXED: strips ALL brackets/parens, simplifies fractions
     function getCleanAnswer() {
         const raw = findReactAnswer();
         console.log('[Forest] raw React answer:', raw, '| type:', typeof raw);
         let s = answerToString(raw);
-        s = s.replace(/^\[|\]$/g, '').trim();
-        // If it's a fraction like 12/84, simplify it
-        const frac = s.match(/^(-?\d+)\s*\/\s*(\d+)$/);
+        // Remove any brackets or parens anywhere in the string
+        s = s.replace(/[\[\]\(\)\{\}]/g, '');
+        s = s.replace(/\s+/g, '').trim();
+        // Simplification check
+        const frac = parseFraction(s);
         if (frac) {
-            let n = parseInt(frac[1], 10), d = parseInt(frac[2], 10);
-            const g = (function gcd(a, b) { return b ? gcd(b, a % b) : Math.abs(a); })(n, d);
-            if (g > 1) { n /= g; d /= g; }
-            s = `${n}/${d}`;
+            s = simplifyFraction(frac.n, frac.d);
         } else {
             s = s.replace(/(\d),(\d)/g, '$1.$2');
         }
@@ -420,7 +553,6 @@ javascript:(function(){
         return s;
     }
 
-    // ===== ACTIONS =====
     async function fillFields(clean) {
         const fields = [...document.querySelectorAll('math-field')];
         for (const field of fields) {
@@ -457,7 +589,7 @@ javascript:(function(){
     function pickMultipleChoice(clean, fallbackToFirst) {
         const choices = [...document.querySelectorAll('.answer-variant-container')];
         if (!choices.length) return false;
-        const norm = x => String(x).replace(/\s+/g, '').replace(',', '.').toLowerCase();
+        const norm = x => String(x).replace(/\s+/g, '').replace(/[\[\]\(\)\{\}]/g, '').replace(',', '.').toLowerCase();
         const target = norm(clean);
         let picked = false;
         for (const c of choices) {
@@ -502,18 +634,14 @@ javascript:(function(){
     async function actionComplete() {
         await zoomOutWhiteboard();
         const clean = getCleanAnswer();
-
         if (clean) {
             const line = makeLongCalculationFor(clean);
             console.log('Whiteboard line:', line);
             const canvas = findWhiteboard();
             if (canvas) simulateDrawing(canvas, line);
-
             await fillFields(clean);
             pickMultipleChoice(clean, true);
         }
-
-        // Submit
         setTimeout(() => {
             const trySubmit = (n) => {
                 const b = document.querySelector('#SUBMIT_ANSWER_BUTTON');
@@ -534,7 +662,6 @@ javascript:(function(){
         }, 700);
     }
 
-    // ===== GUI PANEL =====
     const panel = document.createElement('div');
     panel.id = '__forest_panel__';
     panel.style.cssText = `
@@ -551,17 +678,73 @@ javascript:(function(){
         box-shadow: 0 6px 24px rgba(0,0,0,0.5);
         min-width: 220px;
         user-select: none;
+        transition: all 0.15s ease;
+    `;
+
+    const header = document.createElement('div');
+    header.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+        cursor: move;
     `;
 
     const title = document.createElement('div');
     title.textContent = 'Forest';
-    title.style.cssText = 'font-weight:700; font-size:15px; margin-bottom:10px; color:#89b4fa;';
-    panel.appendChild(title);
+    title.style.cssText = 'font-weight:700; font-size:15px; color:#89b4fa;';
+    header.appendChild(title);
+
+    const headerBtns = document.createElement('div');
+    headerBtns.style.cssText = 'display:flex; gap:6px;';
+
+    const minBtn = document.createElement('button');
+    minBtn.textContent = '–';
+    minBtn.title = 'Minimize';
+    minBtn.style.cssText = `
+        width: 22px; height: 22px;
+        border:none; border-radius: 5px;
+        background:#45475a; color:#fff;
+        font-size: 14px; font-weight:700;
+        line-height: 1; cursor:pointer;
+        display:flex; align-items:center; justify-content:center;
+        padding: 0;
+    `;
+    minBtn.onmouseenter = () => minBtn.style.filter = 'brightness(1.3)';
+    minBtn.onmouseleave = () => minBtn.style.filter = 'none';
+    headerBtns.appendChild(minBtn);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.title = 'Close';
+    closeBtn.style.cssText = `
+        width: 22px; height: 22px;
+        border:none; border-radius: 5px;
+        background:#45475a; color:#fff;
+        font-size: 14px; font-weight:700;
+        line-height: 1; cursor:pointer;
+        display:flex; align-items:center; justify-content:center;
+        padding: 0;
+    `;
+    closeBtn.onmouseenter = () => closeBtn.style.filter = 'brightness(1.3)';
+    closeBtn.onmouseleave = () => closeBtn.style.filter = 'none';
+    closeBtn.onclick = (e) => {
+        e.stopPropagation();
+        panel.remove();
+    };
+    headerBtns.appendChild(closeBtn);
+
+    header.appendChild(headerBtns);
+    panel.appendChild(header);
+
+    const body = document.createElement('div');
+    body.id = '__forest_body__';
+    panel.appendChild(body);
 
     const info = document.createElement('div');
     info.textContent = 'Pick an action:';
     info.style.cssText = 'margin-bottom:10px; opacity:0.8;';
-    panel.appendChild(info);
+    body.appendChild(info);
 
     function makeBtn(label, bg, fn) {
         const b = document.createElement('button');
@@ -581,7 +764,7 @@ javascript:(function(){
             b.disabled = false;
             b.style.opacity = '1';
         };
-        panel.appendChild(b);
+        body.appendChild(b);
         return b;
     }
 
@@ -589,32 +772,61 @@ javascript:(function(){
     makeBtn('2. Answer only', '#a6e3a1', actionAnswerOnly);
     makeBtn('3. Draw on whiteboard only', '#f9e2af', actionDrawOnly);
 
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = 'Close';
-    closeBtn.style.cssText = `
-        display:block; width:100%; margin-top:4px;
-        padding:7px 10px; border:none; border-radius:6px;
-        background:#45475a; color:#fff; font-size:12px;
-        cursor:pointer;
-    `;
-    closeBtn.onclick = () => panel.remove();
-    panel.appendChild(closeBtn);
+    let minimized = false;
 
-    let drag = false, dx = 0, dy = 0;
+    function setMinimized(state) {
+        minimized = state;
+        if (minimized) {
+            body.style.display = 'none';
+            panel.style.minWidth = '0';
+            panel.style.padding = '8px 12px';
+            title.textContent = 'Forest (click to open)';
+            title.style.fontSize = '12px';
+            minBtn.textContent = '+';
+            minBtn.title = 'Restore';
+        } else {
+            body.style.display = '';
+            panel.style.minWidth = '220px';
+            panel.style.padding = '14px 16px';
+            title.textContent = 'Forest';
+            title.style.fontSize = '15px';
+            minBtn.textContent = '–';
+            minBtn.title = 'Minimize';
+        }
+    }
+
+    minBtn.onclick = (e) => {
+        e.stopPropagation();
+        setMinimized(!minimized);
+    };
+
+    header.onclick = () => {
+        if (minimized) setMinimized(false);
+    };
+
+    let drag = false, dx = 0, dy = 0, moved = false;
     title.style.cursor = 'move';
-    title.onmousedown = (e) => {
+    header.addEventListener('mousedown', (e) => {
+        if (e.target === minBtn || e.target === closeBtn) return;
         drag = true;
+        moved = false;
         dx = e.clientX - panel.offsetLeft;
         dy = e.clientY - panel.offsetTop;
         e.preventDefault();
-    };
+    });
     document.addEventListener('mousemove', (e) => {
         if (!drag) return;
+        moved = true;
         panel.style.left = (e.clientX - dx) + 'px';
         panel.style.top = (e.clientY - dy) + 'px';
         panel.style.right = 'auto';
     });
-    document.addEventListener('mouseup', () => drag = false);
+    document.addEventListener('mouseup', () => {
+        if (drag && minimized && !moved) {
+            setMinimized(false);
+        }
+        drag = false;
+    });
 
     document.body.appendChild(panel);
     console.log('Forest panel ready');
