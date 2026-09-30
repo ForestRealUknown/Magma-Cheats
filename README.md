@@ -34,6 +34,7 @@ That's it. The panel pops up and you're ready to go.
 
 - I dont know if i am the first one ever to make this but i'll never find one before atleast.
 - It doesnt work with bookmarks atleast not the whiteboard thing but if you want just the answer you can get that with bookmark.
+- One thing that i cant really fix is how much robotic it looks like when you use the whiteboard thing so if it's a smart teacher just use the find answer thing
 
 ---
 
