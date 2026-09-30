@@ -3,7 +3,7 @@ javascript:(function(){
     const existing = document.getElementById('__forest_panel__');
     if (existing) existing.remove();
 
-    // ===== HELPERS (shared by all actions) =====
+    // ===== HELPERS =====
     function findWhiteboard() {
         const selectors = [
             'canvas', '.whiteboard canvas', '#whiteboard canvas',
@@ -292,28 +292,91 @@ javascript:(function(){
         return true;
     }
 
+    // ===== FIXED: find the correct answer reliably =====
+    function isPlausibleAnswer(v) {
+        if (v === null || v === undefined) return false;
+        if (typeof v === 'number') {
+            if (!isFinite(v)) return false;
+            // Reject values that look like IDs, timestamps, or huge numbers
+            if (Math.abs(v) > 1000000) return false;
+            return true;
+        }
+        if (typeof v === 'string') {
+            const t = v.trim();
+            if (!t) return false;
+            // Reject strings that look like IDs (long digit runs)
+            if (/^\d{6,}$/.test(t)) return false;
+            return true;
+        }
+        if (typeof v === 'object') {
+            if (Array.isArray(v)) return v.length > 0 && isPlausibleAnswer(v[0]);
+            if (v.numerator !== undefined && v.denominator !== undefined) {
+                const n = Number(v.numerator), d = Number(v.denominator);
+                if (!isFinite(n) || !isFinite(d) || d === 0) return false;
+                if (Math.abs(n) > 10000 || Math.abs(d) > 10000) return false;
+                return true;
+            }
+            if (v.n !== undefined && v.d !== undefined) {
+                const n = Number(v.n), d = Number(v.d);
+                if (!isFinite(n) || !isFinite(d) || d === 0) return false;
+                if (Math.abs(n) > 10000 || Math.abs(d) > 10000) return false;
+                return true;
+            }
+            if (v.value !== undefined) return isPlausibleAnswer(v.value);
+        }
+        return false;
+    }
+
     function findReactAnswer() {
         const root = document.getElementById('root');
         if (!root) return null;
         const key = Object.keys(root).find(k => k.includes('react'));
         if (!key) return null;
-        let answer = null;
+
+        let bestAnswer = null;
+        let bestPriority = -1;
+
+        function consider(value, priority) {
+            if (!isPlausibleAnswer(value)) return;
+            if (priority > bestPriority) {
+                bestAnswer = value;
+                bestPriority = priority;
+            }
+        }
+
         function scan(n) {
-            if (!n || answer !== null) return;
+            if (!n) return;
+
+            // memoizedState chain
             let st = n.memoizedState;
             while (st) {
                 const v = st.memoizedState;
-                if (v && v.correctAnswer !== undefined) answer = v.correctAnswer;
-                if (v && v.answer !== undefined) answer = v.answer;
+                if (v && typeof v === 'object') {
+                    if (v.correctAnswer !== undefined) consider(v.correctAnswer, 3);
+                    if (v.correctAnswerValue !== undefined) consider(v.correctAnswerValue, 3);
+                    if (v.expectedAnswer !== undefined) consider(v.expectedAnswer, 2);
+                    if (v.answer !== undefined && v.correctAnswer === undefined) {
+                        consider(v.answer, 1);
+                    }
+                }
                 st = st.next;
             }
+
+            // memoizedProps
             const p = n.memoizedProps || {};
-            if (p.correctAnswer !== undefined) answer = p.correctAnswer;
-            if (p.answer !== undefined) answer = p.answer;
-            scan(n.child); scan(n.sibling);
+            if (p.correctAnswer !== undefined) consider(p.correctAnswer, 3);
+            if (p.correctAnswerValue !== undefined) consider(p.correctAnswerValue, 3);
+            if (p.expectedAnswer !== undefined) consider(p.expectedAnswer, 2);
+            if (p.answer !== undefined && p.correctAnswer === undefined) {
+                consider(p.answer, 1);
+            }
+
+            scan(n.child);
+            scan(n.sibling);
         }
+
         scan(root[key]);
-        return answer;
+        return bestAnswer;
     }
 
     function answerToString(a) {
@@ -328,8 +391,9 @@ javascript:(function(){
         }
         if (typeof a === 'string') return a.trim();
         if (typeof a === 'object') {
-            if (a.numerator !== undefined && a.denominator !== undefined)
+            if (a.numerator !== undefined && a.denominator !== undefined) {
                 return `${a.numerator}/${a.denominator}`;
+            }
             if (a.n !== undefined && a.d !== undefined) return `${a.n}/${a.d}`;
             if (a.value !== undefined) return String(a.value);
         }
@@ -338,69 +402,98 @@ javascript:(function(){
 
     function getCleanAnswer() {
         const raw = findReactAnswer();
+        console.log('[Forest] raw React answer:', raw, '| type:', typeof raw);
         let s = answerToString(raw);
         s = s.replace(/^\[|\]$/g, '').trim();
-        s = s.replace(/(\d),(\d)/g, '$1.$2');
+        // If it's a fraction like 12/84, simplify it
+        const frac = s.match(/^(-?\d+)\s*\/\s*(\d+)$/);
+        if (frac) {
+            let n = parseInt(frac[1], 10), d = parseInt(frac[2], 10);
+            const g = (function gcd(a, b) { return b ? gcd(b, a % b) : Math.abs(a); })(n, d);
+            if (g > 1) { n /= g; d /= g; }
+            s = `${n}/${d}`;
+        } else {
+            s = s.replace(/(\d),(\d)/g, '$1.$2');
+        }
         s = s.replace(/^=\s*/, '').trim();
+        console.log('[Forest] final answer:', JSON.stringify(s));
         return s;
     }
 
     // ===== ACTIONS =====
-    async function actionAnswerOnly() {
-        const clean = getCleanAnswer();
-        console.log('Answer only. Normalized answer:', clean);
-        if (!clean) { alert('No answer found in React state'); return; }
+    async function fillFields(clean) {
         const fields = [...document.querySelectorAll('math-field')];
-        fields.forEach(field => {
+        for (const field of fields) {
             try { field.blur(); } catch (e) {}
             try {
-                if (typeof field.setValue === 'function')
-                    field.setValue('', {suppressChangeNotifications: true});
+                if (typeof field.setValue === 'function') {
+                    field.setValue('', { suppressChangeNotifications: true });
+                }
             } catch (e) {}
             try { field.value = ''; } catch (e) {}
             const inner = field.querySelector('input, textarea');
             if (inner) inner.value = '';
-            field.dispatchEvent(new Event('input', {bubbles: true}));
-            field.dispatchEvent(new Event('change', {bubbles: true}));
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            field.dispatchEvent(new Event('change', { bubbles: true }));
             field.focus();
-            setTimeout(() => {
-                let ok = false;
-                try {
-                    if (typeof field.insert === 'function') {
-                        field.insert(clean);
-                        ok = true;
-                    }
-                } catch (e) {}
-                if (!ok) { try { field.value = clean; } catch (e) {} }
-                field.dispatchEvent(new InputEvent('input', {
-                    bubbles: true, cancelable: true,
-                    inputType: 'insertText', data: clean
-                }));
-                field.dispatchEvent(new Event('change', {bubbles: true}));
-            }, 50);
-        });
-        // Multiple-choice too, in case it's that kind
-        const choices = [...document.querySelectorAll('.answer-variant-container')];
-        if (choices.length && clean) {
-            choices.forEach(c => {
-                const t = c.innerText.replace(/\s+/g, ' ').trim();
-                if (t.includes(clean) || clean.includes(t)) {
-                    const radio = c.querySelector('input[type="radio"]');
-                    if (radio) {
-                        radio.checked = true;
-                        radio.dispatchEvent(new Event('click', {bubbles: true}));
-                        radio.dispatchEvent(new Event('change', {bubbles: true}));
-                    }
-                    c.click();
+            await new Promise(r => setTimeout(r, 50));
+            try {
+                if (typeof field.setValue === 'function') {
+                    field.setValue(clean, { suppressChangeNotifications: false });
+                } else if (typeof field.insert === 'function') {
+                    field.insert(clean);
+                } else {
+                    field.value = clean;
                 }
-            });
+            } catch (e) { console.error(e); }
+            field.dispatchEvent(new InputEvent('input', {
+                bubbles: true, cancelable: true,
+                inputType: 'insertText', data: clean
+            }));
+            field.dispatchEvent(new Event('change', { bubbles: true }));
         }
+    }
+
+    function pickMultipleChoice(clean, fallbackToFirst) {
+        const choices = [...document.querySelectorAll('.answer-variant-container')];
+        if (!choices.length) return false;
+        const norm = x => String(x).replace(/\s+/g, '').replace(',', '.').toLowerCase();
+        const target = norm(clean);
+        let picked = false;
+        for (const c of choices) {
+            const t = norm(c.innerText);
+            if (t === target) {
+                const radio = c.querySelector('input[type="radio"]');
+                if (radio) {
+                    radio.checked = true;
+                    radio.dispatchEvent(new Event('click', { bubbles: true }));
+                    radio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                c.click();
+                picked = true;
+                break;
+            }
+        }
+        if (!picked && fallbackToFirst) {
+            choices[0].click();
+            picked = true;
+        }
+        return picked;
+    }
+
+    async function actionAnswerOnly() {
+        const clean = getCleanAnswer();
+        if (!clean) { alert('No answer found in React state'); return; }
+        await fillFields(clean);
+        pickMultipleChoice(clean, false);
     }
 
     async function actionDrawOnly() {
         await zoomOutWhiteboard();
         const clean = getCleanAnswer();
-        const line = clean ? makeLongCalculationFor(clean) : makeLongCalculationFor(String(Math.floor(Math.random() * 900) + 100));
+        const line = clean
+            ? makeLongCalculationFor(clean)
+            : makeLongCalculationFor(String(Math.floor(Math.random() * 900) + 100));
         console.log('Draw only. Line:', line);
         const canvas = findWhiteboard();
         if (canvas) simulateDrawing(canvas, line);
@@ -409,82 +502,33 @@ javascript:(function(){
     async function actionComplete() {
         await zoomOutWhiteboard();
         const clean = getCleanAnswer();
-        console.log('Complete. Normalized answer:', clean);
 
-        // Draw long work on whiteboard
         if (clean) {
             const line = makeLongCalculationFor(clean);
             console.log('Whiteboard line:', line);
             const canvas = findWhiteboard();
             if (canvas) simulateDrawing(canvas, line);
-        }
 
-        // Fill math-field or select multiple choice
-        if (clean) {
-            const fields = [...document.querySelectorAll('math-field')];
-            fields.forEach(field => {
-                try { field.blur(); } catch (e) {}
-                try {
-                    if (typeof field.setValue === 'function')
-                        field.setValue('', {suppressChangeNotifications: true});
-                } catch (e) {}
-                try { field.value = ''; } catch (e) {}
-                const inner = field.querySelector('input, textarea');
-                if (inner) inner.value = '';
-                field.dispatchEvent(new Event('input', {bubbles: true}));
-                field.dispatchEvent(new Event('change', {bubbles: true}));
-                field.focus();
-                setTimeout(() => {
-                    let ok = false;
-                    try {
-                        if (typeof field.insert === 'function') {
-                            field.insert(clean);
-                            ok = true;
-                        }
-                    } catch (e) {}
-                    if (!ok) { try { field.value = clean; } catch (e) {} }
-                    field.dispatchEvent(new InputEvent('input', {
-                        bubbles: true, cancelable: true,
-                        inputType: 'insertText', data: clean
-                    }));
-                    field.dispatchEvent(new Event('change', {bubbles: true}));
-                }, 50);
-            });
-
-            const choices = [...document.querySelectorAll('.answer-variant-container')];
-            if (choices.length) {
-                let found = false;
-                choices.forEach(c => {
-                    const t = c.innerText.replace(/\s+/g, ' ').trim();
-                    if (t.includes(clean) || clean.includes(t)) {
-                        const radio = c.querySelector('input[type="radio"]');
-                        if (radio) {
-                            radio.checked = true;
-                            radio.dispatchEvent(new Event('click', {bubbles: true}));
-                            radio.dispatchEvent(new Event('change', {bubbles: true}));
-                        }
-                        c.click();
-                        found = true;
-                    }
-                });
-                if (!found) choices[0].click();
-            }
+            await fillFields(clean);
+            pickMultipleChoice(clean, true);
         }
 
         // Submit
         setTimeout(() => {
             const trySubmit = (n) => {
                 const b = document.querySelector('#SUBMIT_ANSWER_BUTTON');
-                if (b) {
-                    if (!b.disabled) { b.click(); return; }
-                    if (n >= 3) {
-                        b.disabled = false;
-                        b.classList.remove('_Disabled_1vdsg_349', '_ProblemAnswerButtonDisabled_1ov0s_21');
-                        b.click();
-                        return;
-                    }
-                    setTimeout(() => trySubmit(n + 1), 500 * n);
+                if (!b) return;
+                if (!b.disabled) { b.click(); return; }
+                if (n >= 3) {
+                    b.disabled = false;
+                    b.classList.remove(
+                        '_Disabled_1vdsg_349',
+                        '_ProblemAnswerButtonDisabled_1ov0s_21'
+                    );
+                    b.click();
+                    return;
                 }
+                setTimeout(() => trySubmit(n + 1), 500 * n);
             };
             trySubmit(1);
         }, 700);
@@ -556,7 +600,6 @@ javascript:(function(){
     closeBtn.onclick = () => panel.remove();
     panel.appendChild(closeBtn);
 
-    // Make draggable
     let drag = false, dx = 0, dy = 0;
     title.style.cursor = 'move';
     title.onmousedown = (e) => {
