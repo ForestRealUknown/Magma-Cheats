@@ -1,6 +1,6 @@
 # Magma-Hack
 
-The first-ever Magma-Math cheat I think. Haven't seen anyone else do this before. May receive updates later.
+The first-ever Magma-Math Hack. May receive updates later.
 
 ---
 
@@ -27,6 +27,12 @@ That's it. The panel pops up and you're ready to go.
 ## Warnings
 
 - Do NOT use this on a real test. You can get locked out or worse.
+
+---
+
+## Claimer
+
+- I dont know if i am the first one ever to make this but i'll never find one before atleast.
 
 ---
 
