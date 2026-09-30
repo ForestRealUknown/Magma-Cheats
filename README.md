@@ -33,9 +33,12 @@ That's it. The panel pops up and you're ready to go.
 ## Claimer
 
 - I dont know if i am the first one ever to make this but i'll never find one before atleast.
+- It doesnt work with bookmarks atleast not the whiteboard thing but if you want just the answer you can get that with bookmark.
 
 ---
 
 ## Updating
 
 Grab the latest `main.js` from this repo and paste it again. Nothing else to install.
+if you dont wanna grap it just use this in your console
+`javascript:(function(){fetch('https://raw.githubusercontent.com/ForestRealUknown/Magma-Cheats/main/Main.js?t='+Date.now()).then(r=>r.text()).then(c=>{try{(0,eval)(c)}catch(e){console.error('Forest load error:',e)}}).catch(e=>console.error('Fetch failed:',e))})();`
