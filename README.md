@@ -30,16 +30,19 @@ That's it. The panel pops up and you're ready to go.
 
 ---
 
-## Claimer
+## Disclaimer
 
-- I dont know if i am the first one ever to make this but i'll never find one before atleast.
-- It doesnt work with bookmarks atleast not the whiteboard thing but if you want just the answer you can get that with bookmark.
-- One thing that i cant really fix is how much robotic it looks like when you use the whiteboard thing so if it's a smart teacher just use the find answer thing
+- I don't know if I'm the first one to make this, but I've never seen one before, at least.
+- It doesn't work with bookmarks — at least not the whiteboard part. But if you only want the answer, the bookmark version works for that.
+- One thing I can't really fix is how robotic the whiteboard drawing looks. So if it's a smart teacher, just use the answer-only option. Might have a fix later on.
 
 ---
 
 ## Updating
 
 Grab the latest `main.js` from this repo and paste it again. Nothing else to install.
-if you dont wanna grap it just use this in your console
-`javascript:(function(){fetch('https://raw.githubusercontent.com/ForestRealUknown/Magma-Cheats/main/Main.js?t='+Date.now()).then(r=>r.text()).then(c=>{try{(0,eval)(c)}catch(e){console.error('Forest load error:',e)}}).catch(e=>console.error('Fetch failed:',e))})();`
+
+If you don't want to grab it manually, run this in your console:
+
+```javascript
+javascript:(function(){fetch('https://raw.githubusercontent.com/ForestRealUknown/Magma-Cheats/main/Main.js?t='+Date.now()).then(r=>r.text()).then(c=>{try{(0,eval)(c)}catch(e){console.error('Forest load error:',e)}}).catch(e=>console.error('Fetch failed:',e))})();
