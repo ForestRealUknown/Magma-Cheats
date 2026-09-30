@@ -34,11 +34,12 @@ That's it. The panel pops up and you're ready to go.
 
 - I don't know if I'm the first one to make this, but I've never seen one before, at least.
 - It doesn't work with bookmarks — at least not the whiteboard part. But if you only want the answer, the bookmark version works for that.
-- One thing I can't really fix is how robotic the whiteboard drawing looks. So if it's a smart teacher, just use the answer-only option. Might have a fix later on.
 
 ---
 
 ## Updating
+
+- In this update the robotic whiteboard thing is fixed with more humanly movement and the wrong answeres stuff is fixed
 
 Grab the latest `main.js` from this repo and paste it again. Nothing else to install.
 
