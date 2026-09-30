@@ -1,6 +1,6 @@
 # Magma-Hack
 
-The first-ever Magma-Math cheat. May receive updates later.
+The first-ever Magma-Math cheat I think. Haven't seen anyone else do this before. May receive updates later.
 
 ---
 
@@ -10,7 +10,7 @@ The first-ever Magma-Math cheat. May receive updates later.
 2. Go to the Console tab.
 3. Open `main.js` and copy everything inside it.
 4. Paste it into the console and press Enter.
-5. If the console asks you to type something, type `allow pasting` and press Enter first.
+5. If the console blocks the paste, type `allow pasting` and press Enter first.
 
 That's it. The panel pops up and you're ready to go.
 
@@ -27,8 +27,6 @@ That's it. The panel pops up and you're ready to go.
 ## Warnings
 
 - Do NOT use this on a real test. You can get locked out or worse.
-- Use at your own risk.
-- No warranty, no support, no refunds.
 
 ---
 
